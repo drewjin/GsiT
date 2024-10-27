@@ -2,7 +2,7 @@
 
 ## Acknowledgement
 
-The repository is based on [MMSA](https://github.com/thuiar/MMSA).
+The repository is based on [MMSA](https://github.com/thuiar/MMSA) and [xLSTM](https://github.com/NX-AI/xlstm).
 
 **We strongly recommend integrating the core code directly into the MMSA framework. This repository is structured entirely in line with the MMSA setup. However, minor issues may still arise, and we suggest directly incorporating the files from this repository into the MMSA framework for seamless execution.**
 
