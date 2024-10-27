@@ -1,5 +1,9 @@
 # GSIFN: A Graph-Structured and Interlaced-Masked Multimodal Transformer-based Fusion Network for Multimodal Sentiment Analysis
 
+## News
+
+- `2024-9-16`: Submitted to COLING 2025, currently under review. 
+
 ## Acknowledgement
 
 The repository is based on [MMSA](https://github.com/thuiar/MMSA) and [xLSTM](https://github.com/NX-AI/xlstm).
