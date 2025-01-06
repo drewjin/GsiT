@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import Parameter
+# from ..Kernel import Matrix
+from xformers.ops import fmha
 
 
 __all__ = ['GraphAttention']
@@ -106,76 +108,146 @@ class GraphAttention(nn.Module):
             if edge_mask is not None:
                 edge_mask = torch.cat([edge_mask, edge_mask.new_zeros(edge_mask.size(0), 1)], dim=1)
         
-        # Decomposition: Naive Torch
-        text, vision, audio = seq_split
-        s1 = (0, text)                 # [0, t)
-        s2 = (text, text + vision)             # [t, t + v)
-        s3 = (text + vision, text + vision + audio)     # [t + v, t + v + a)
-        attn_weights = []
-        if direction == 'forward': 
-            attn_weights.append( # v -> t
-                torch.bmm(q[:, s1[0]:s1[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
-            ) 
-            attn_weights.append( # a -> v
-                torch.bmm(q[:, s2[0]:s2[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
-            )
-            attn_weights.append( # t -> a
-                torch.bmm(q[:, s3[0]:s3[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
-            )
-        elif direction == 'backward':
-            attn_weights.append( # a -> t
-                torch.bmm(q[:, s1[0]:s1[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
-            ) 
-            attn_weights.append( # t -> v
-                torch.bmm(q[:, s2[0]:s2[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
-            )
-            attn_weights.append( # v -> a
-                torch.bmm(q[:, s3[0]:s3[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
-            )
-        else:
-            attn_weights.append( # a -> t
-                torch.bmm(q[:, s1[0]:s1[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
-            ) 
-            attn_weights.append( # t -> v
-                torch.bmm(q[:, s2[0]:s2[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
-            )
-            attn_weights.append( # v -> a
-                torch.bmm(q[:, s3[0]:s3[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
-            )
-        # TODO: Triton Kernel
+        
+        naive = False
+        if naive:
+            # NAIVE Version
+            # attn_weights = torch.bmm(q, k.transpose(1, 2))
+            # temp_weights = attn_weights.clone()
+            text, vision, audio = seq_split
+            s1 = (0, text)                 # [0, t)
+            s2 = (text, text + vision)             # [t, t + v)
+            s3 = (text + vision, text + vision + audio)     # [t + v, t + v + a)
+            attn_weights = []
+            if direction == 'forward':
+                attn_weights.append( # v -> t
+                    torch.bmm(q[:, s1[0]:s1[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
+                ) 
+                attn_weights.append( # a -> v
+                    torch.bmm(q[:, s2[0]:s2[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
+                )
+                attn_weights.append( # t -> a
+                    torch.bmm(q[:, s3[0]:s3[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
+                )
+            elif direction == 'backward':
+                attn_weights.append( # a -> t
+                    torch.bmm(q[:, s1[0]:s1[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
+                ) 
+                attn_weights.append( # t -> v
+                    torch.bmm(q[:, s2[0]:s2[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
+                )
+                attn_weights.append( # v -> a
+                    torch.bmm(q[:, s3[0]:s3[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
+                )
+            else:
+                attn_weights.append( # a -> t
+                    torch.bmm(q[:, s1[0]:s1[1]], k[:, s1[0]:s1[1]].transpose(1, 2))
+                ) 
+                attn_weights.append( # t -> v
+                    torch.bmm(q[:, s2[0]:s2[1]], k[:, s2[0]:s2[1]].transpose(1, 2))
+                )
+                attn_weights.append( # v -> a
+                    torch.bmm(q[:, s3[0]:s3[1]], k[:, s3[0]:s3[1]].transpose(1, 2))
+                )    
+            
+            # assert list(attn_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
+            # if edge_mask is not None:
+            #     try:
+            #         attn_weights += edge_mask.unsqueeze(0)
+            #     except:
+            #         print(attn_weights.shape)
+            #         print(edge_mask.unsqueeze(0).shape)
+            #         assert False
 
-        if mask_fixer is not None:
-            attn_weights = (F.softmax(attn_weights.float(), dim=-1) * mask_fixer).type_as(attn_weights) 
-        else:
-            # attn_weights = F.softmax(attn_weights.float(), dim=-1).type_as(attn_weights)
+            def plot(temp):
+                import numpy as np
+                import matplotlib.pyplot as plt
+                import seaborn as sns
+                
+                # plt.figure()
+                mask_arr = np.array(temp)
+                plt.figure(figsize=(10, 10), dpi=600)
+                sns.heatmap(mask_arr, cmap='viridis')
+                plt.show()    
+                # plt.savefig('/home/drew/Desktop/Research/MMSA/src/MMSA/models/custom/CrossModalGraphFormer/fig/attention_map.png')       
+            # _plot_ = plot_map
+
+            if mask_fixer is not None:
+                attn_weights = (F.softmax(attn_weights.float(), dim=-1) * mask_fixer).type_as(attn_weights) 
+            else:
+                # attn_weights = F.softmax(attn_weights.float(), dim=-1).type_as(attn_weights)
+                attn_weights = [
+                    F.softmax(attn_weight.float(), dim=-1).type_as(attn_weight)
+                    for attn_weight in attn_weights
+                ]
+            
+            # if _plot_:
+            #     temp_1 = attn_weights.clone()[0].detach().to('cpu')
+            #     plot(temp_1)
+            # attn_weights = F.relu(attn_weights)
+            # attn_weights = attn_weights / torch.max(attn_weights)
+            # attn_weights = F.dropout(attn_weights, p=self.attn_dropout, training=self.training)
             attn_weights = [
-                F.softmax(attn_weight.float(), dim=-1).type_as(attn_weight)
+                F.dropout(attn_weight, p=self.attn_dropout, training=self.training)
                 for attn_weight in attn_weights
             ]
-        attn_weights = [
-            F.dropout(attn_weight, p=self.attn_dropout, training=self.training)
-            for attn_weight in attn_weights
-        ]
-    
-        if direction == 'forward':
-            attn_weights[0] = torch.bmm(attn_weights[0], v[:, s2[0]:s2[1]])
-            attn_weights[1] = torch.bmm(attn_weights[1], v[:, s3[0]:s3[1]])
-            attn_weights[2] = torch.bmm(attn_weights[2], v[:, s1[0]:s1[1]])
-        elif direction == 'backward':
-            attn_weights[0] = torch.bmm(attn_weights[0], v[:, s3[0]:s3[1]])
-            attn_weights[1] = torch.bmm(attn_weights[1], v[:, s1[0]:s1[1]])
-            attn_weights[2] = torch.bmm(attn_weights[2], v[:, s2[0]:s2[1]])
-        else:
-            attn_weights[0] = torch.bmm(attn_weights[0], v[:, s1[0]:s1[1]])
-            attn_weights[1] = torch.bmm(attn_weights[1], v[:, s2[0]:s2[1]])
-            attn_weights[2] = torch.bmm(attn_weights[2], v[:, s3[0]:s3[1]])
             
-        attn = torch.concat(attn_weights, dim=1)
+            # if _plot_:
+            #     temp_2 = attn_weights.clone()[0].detach().to('cpu')
+            #     plot(temp_2)     
 
-        attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
-        attn = self.out_proj(attn)
+            # attn = torch.bmm(attn_weights, v)
+            # assert list(attn.size()) == [bsz * self.num_heads, tgt_len, self.head_dim]
+            if direction == 'forward':
+                attn_weights[0] = torch.bmm(attn_weights[0], v[:, s2[0]:s2[1]])
+                attn_weights[1] = torch.bmm(attn_weights[1], v[:, s3[0]:s3[1]])
+                attn_weights[2] = torch.bmm(attn_weights[2], v[:, s1[0]:s1[1]])
+            elif direction == 'backward':
+                attn_weights[0] = torch.bmm(attn_weights[0], v[:, s3[0]:s3[1]])
+                attn_weights[1] = torch.bmm(attn_weights[1], v[:, s1[0]:s1[1]])
+                attn_weights[2] = torch.bmm(attn_weights[2], v[:, s2[0]:s2[1]])
+            else:
+                attn_weights[0] = torch.bmm(attn_weights[0], v[:, s1[0]:s1[1]])
+                attn_weights[1] = torch.bmm(attn_weights[1], v[:, s2[0]:s2[1]])
+                attn_weights[2] = torch.bmm(attn_weights[2], v[:, s3[0]:s3[1]])
+                
+            attn = torch.concat(attn_weights, dim=1)
 
+            attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+            attn = self.out_proj(attn)
+        else:
+            # Use Kernel
+            q_list = torch.split(q.unsqueeze(2), seq_split, dim=1)
+            k_list = torch.split(k.unsqueeze(2), seq_split, dim=1)
+            v_list = torch.split(v.unsqueeze(2), seq_split, dim=1)
+            if direction == 'forward':
+                k_list = [k_list[1], k_list[2], k_list[0]]
+                v_list = [v_list[1], v_list[2], v_list[0]]
+                attn_bias, q, k, v = fmha.BlockDiagonalMask.from_tensor_lists_qkv(
+                    q_list, k_list, v_list
+                )
+            elif direction == 'backward':
+                k_list = [k_list[2], k_list[0], k_list[1]]
+                v_list = [v_list[2], v_list[0], v_list[1]]
+                attn_bias, q, k, v = fmha.BlockDiagonalMask.from_tensor_lists_qkv(
+                    q_list, k_list, v_list
+                )
+            else:
+                attn_bias, q, k, v = fmha.BlockDiagonalMask.from_tensor_lists_qkv(
+                    q_list, k_list, v_list
+                )
+            out = attn_bias.split_queries(
+                fmha.memory_efficient_attention(q, k, v, attn_bias=attn_bias)
+            )
+            attn = torch.concat(out, dim=1).squeeze(2)
+            attn = attn.transpose(0, 1).contiguous().view(tgt_len, bsz, embed_dim)
+            attn = self.out_proj(attn)
+            
+
+        # average attention weights over heads
+        # attn_weights = attn_weights.view(bsz, self.num_heads, tgt_len, src_len)
+        # attn_weights = attn_weights.sum(dim=1) / self.num_heads
         return attn, (None, None)
 
     def in_proj_qkv(self, query):
