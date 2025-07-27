@@ -15,3 +15,11 @@ The main model trainer is in `GsiT/src/MMSA-GsiT/trains/custom/GSIT.py`.
 The main configuration is in `GsiT/src/MMSA-GsiT/config/config_regression.json`.
 
 The Triton kernel is in `GsiT/src/MMSA-GsiT/models/custom/GSIT/modules/Kernel`.
+
+## Future Works
+
+New kernel implementation is as follows:
+
+[mbs-attn](https://github.com/drewjin/mbs-attn)
+
+We are planning to add a PR to MMSA framework.
